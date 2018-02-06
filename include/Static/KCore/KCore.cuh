@@ -10,7 +10,13 @@
 
 namespace hornets_nest {
 
-using HornetGraph = gpu::Csr<EMPTY, EMPTY>;
+using HornetGraph = gpu::Hornet<EMPTY, EMPTY>;
+
+struct KCoreData {
+    vid_t *src;
+    vid_t *dst;
+    int counter;
+};
 
 class KCore : public StaticAlgorithm<HornetGraph> {
 public:
@@ -26,10 +32,13 @@ private:
     // HostDeviceVar<KCoreData> hd_data;
 
     //load_balancing::BinarySearch load_balancing;
-    //load_balancing::VertexBased1 load_balancing;
+    load_balancing::VertexBased1 load_balancing;
 
     TwoLevelQueue<vid_t> vqueue;
-    TwoLevelQueue<vid_t> equeue;
+    TwoLevelQueue<vid_t> src_equeue;
+    TwoLevelQueue<vid_t> dst_equeue;
+
+    // HostDeviceVar<KCoreData> hd_data;
     // MultiLevelQueue<vid_t> nodes_removed;
 };
 
