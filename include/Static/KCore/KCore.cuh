@@ -37,6 +37,8 @@ private:
     TwoLevelQueue<vid_t> vqueue;
     TwoLevelQueue<vid_t> src_equeue;
     TwoLevelQueue<vid_t> dst_equeue;
+    TwoLevelQueue<vid_t> tot_src_equeue;
+    TwoLevelQueue<vid_t> tot_dst_equeue;
 
     // HostDeviceVar<KCoreData> hd_data;
     // MultiLevelQueue<vid_t> nodes_removed;
