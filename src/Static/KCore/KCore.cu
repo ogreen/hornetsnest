@@ -1,4 +1,5 @@
 #include "Static/KCore/KCore.cuh"
+#include <fstream>
 // #include <Device/Primitives/CubWrapper.cuh>
 
 namespace hornets_nest {
@@ -86,7 +87,9 @@ struct PrintVertices {
     OPERATOR(Vertex &v) {
         if (v.id() == 0) {
             for (uint32_t i = 0; i < size; i++) {
-                printf("%d %d\n", src_ptr[i], dst_ptr[i]);
+                // printf("%d %d\n", src_ptr[i], dst_ptr[i]);
+                printf("batch_src[%d] = %d; batch_dst[%d] = %d;\n", i, src_ptr[i],
+                                                                    i, dst_ptr[i]);
             }
         }
     }
@@ -101,38 +104,8 @@ void remove_bidirect_batch(HornetGraph &hornet,
                            TwoLevelQueue<vid_t> dst_equeue) {
 
 
-
-    hornet.print();
+    // hornet.print();
     std::cout << "\n\n";
-    // Sort src_equeue, dst_equeue by dst vertex.
-    xlib::CubSortPairs2<vid_t, vid_t>::srun(
-                       (vid_t*) dst_equeue.device_input_ptr(),
-                       (vid_t*) src_equeue.device_input_ptr(),
-                                src_equeue.size(),
-                        (vid_t) std::numeric_limits<vid_t>::max(),
-                        (vid_t) std::numeric_limits<vid_t>::max());
-
-    gpu::BatchUpdate batch_update_dst(
-                       (vid_t*) dst_equeue.device_input_ptr(),
-                       (vid_t*) src_equeue.device_input_ptr(),
-                                src_equeue.size());
-
-    std::cout << "sorted by dst\n";
-    forAllVertices(hornet, PrintVertices { src_equeue.device_input_ptr(),
-                                           dst_equeue.device_input_ptr(),
-                                           src_equeue.size() } );
-    std::cout << "\n\n";
-
-    hornet.allocateEdgeDeletion(src_equeue.size(), 
-                                gpu::batch_property::IN_PLACE);
-
-    // Delete edges in reverse direction.
-    hornet.deleteEdgeBatch(batch_update_dst);
-
-    std::cout << "h_copy_mid:\n";
-    hornet.print();
-    std::cout << "\n\n";
-
 
 
     // Sort src_equeue, dst_equeue by src vertex.
@@ -149,7 +122,7 @@ void remove_bidirect_batch(HornetGraph &hornet,
                                 src_equeue.size());
 
     #if 0
-    std::cout << "sorted by src\n";
+    std::cout << "sorted by src " << src_equeue.size() << std::endl;
     forAllVertices(hornet, PrintVertices { src_equeue.device_input_ptr(),
                                            dst_equeue.device_input_ptr(),
                                            src_equeue.size() } );
@@ -161,6 +134,43 @@ void remove_bidirect_batch(HornetGraph &hornet,
 
     // Delete edges in the forward direction.
     hornet.deleteEdgeBatch(batch_update_src);
+
+    #if 0
+    std::cout << "h_copy_mid:\n";
+    hornet.print();
+    std::cout << "\n\n";
+    #endif
+
+    // Sort src_equeue, dst_equeue by dst vertex.
+    xlib::CubSortPairs2<vid_t, vid_t>::srun(
+                       (vid_t*) dst_equeue.device_input_ptr(),
+                       (vid_t*) src_equeue.device_input_ptr(),
+                                src_equeue.size(),
+                        (vid_t) std::numeric_limits<vid_t>::max(),
+                        (vid_t) std::numeric_limits<vid_t>::max());
+
+    gpu::BatchUpdate batch_update_dst(
+                       (vid_t*) dst_equeue.device_input_ptr(),
+                       (vid_t*) src_equeue.device_input_ptr(),
+                                src_equeue.size());
+
+    #if 0
+    std::cout << "sorted by dst " << src_equeue.size() << "\n";
+    forAllVertices(hornet, PrintVertices { src_equeue.device_input_ptr(),
+                                           dst_equeue.device_input_ptr(),
+                                           src_equeue.size() } );
+    std::cout << "\n\n";
+    #endif
+
+    hornet.allocateEdgeDeletion(src_equeue.size(), 
+                                gpu::batch_property::IN_PLACE);
+
+    // Delete edges in reverse direction.
+    hornet.deleteEdgeBatch(batch_update_dst);
+
+    // hornet.print();
+    std::cout << "\n\n";
+
 }
 
 void kcores(HornetGraph &hornet, 
@@ -174,7 +184,7 @@ void kcores(HornetGraph &hornet,
     uint32_t peel = 0;
 
     while (*ne > 0) {
-        std::cout << "peel: " << peel << "\n";
+        std::cout << "peel: " << peel << " ne: " << *ne << "\n";
         forAllVertices(hornet, CheckDeg { vqueue, peel });
         
         vqueue.swap();
@@ -207,7 +217,7 @@ void kcores(HornetGraph &hornet,
             *ne -= 2 * src_equeue.size();
 
             // Save vqueue if ne == 0 -- these are vertices in the kcore.
-            if (ne > 0) {
+            if (*ne > 0) {
                 vqueue.clear();
             }
         } else {
@@ -232,38 +242,49 @@ HornetGraph* hornet_copy(HornetGraph &hornet,
     return h_copy;
 }
 
+void json_dump(vid_t *src, vid_t *dst, uint32_t *peel, uint32_t peel_edges) {
+    std::ofstream output_file;
+    output_file.open("output.txt");
+    
+    output_file << "{\n";
+    for (uint32_t i = 0; i < peel_edges; i++) {
+        output_file << "\"" << src[i] << "," << dst[i] << "\": " << peel[i];
+        if (i < peel_edges - 1) {
+            output_file << ",";
+        }
+        output_file << "\n";
+    }
+    output_file << "}";
+    output_file.close();
+}
+
 void KCore::run() {
-    vid_t *src     = new vid_t[hornet.nE() / 2];
-    vid_t *dst     = new vid_t[hornet.nE() / 2];
-    uint32_t *peel = new uint32_t[hornet.nE() / 2];
+    vid_t *src     = new vid_t[hornet.nE() / 2 + 1];
+    vid_t *dst     = new vid_t[hornet.nE() / 2 + 1];
+    uint32_t *peel = new uint32_t[hornet.nE() / 2 + 1];
     uint32_t peel_edges = 0;
     uint32_t ne = hornet.nE();
+    uint32_t ne_orig = hornet.nE();
 
-    // for (uint32_t i = 0; i < 3; i++) {
-    while (peel_edges < hornet.nE() / 2) {
+    while (peel_edges < ne_orig / 2) {
         uint32_t max_peel = 0;
-        ne = hornet.nE() - 2 * peel_edges;
+        ne = ne_orig - 2 * peel_edges;
 
+        std::cout << "hornet:\n";
+        hornet.print();
+        std::cout << "\n\n";
         HornetGraph &h_copy = *hornet_copy(hornet, 
                                            tot_src_equeue, 
                                            tot_dst_equeue);
-
-        #if 0
-        std::cout << "h_copy_before:\n";
-        // hornet.print();
-        h_copy.print();
-        std::cout << "\n\n";
-        #endif
         if (tot_src_equeue.size() > 0) {
             remove_bidirect_batch(h_copy, tot_src_equeue, tot_dst_equeue);
         }
 
-        #if 0
-        std::cout << "h_copy_after:\n";
+        std::cout << "h_copy:\n";
         h_copy.print();
         std::cout << "\n\n";
-        #endif
 
+        std::cout << "ne: " << ne << "\n";
         kcores(h_copy, vqueue, src_equeue, dst_equeue, load_balancing, 
                &max_peel, &ne);
 
@@ -283,17 +304,12 @@ void KCore::run() {
         }
 
         for (uint32_t i = 0; i < src_equeue.size(); i++) {
-            std::cout << src[peel_edges + i] << " " << dst[peel_edges + i] << "\n";
             tot_src_equeue.insert(src[peel_edges + i]);
             tot_dst_equeue.insert(dst[peel_edges + i]);
         }
         peel_edges += src_equeue.size();
 
         remove_bidirect_batch(hornet, src_equeue, dst_equeue);
-        #if 0
-        hornet.print();
-        std::cout << "\n";
-        #endif
 
         src_equeue.clear();
         dst_equeue.clear();
@@ -301,11 +317,9 @@ void KCore::run() {
         h_copy.~Hornet();
     }
 
-    std::cout << "peels:" << "\n";
-    for (uint32_t i = 0; i < peel_edges; i++) {
-        std::cout << src[i] << " " << dst[i] << " " << peel[i] << "\n";
-    }
+    json_dump(src, dst, peel, peel_edges);
 }
+
 
 void KCore::release() {
     std::cout << "ran3" << std::endl;

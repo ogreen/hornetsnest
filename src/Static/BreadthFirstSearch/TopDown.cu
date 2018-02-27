@@ -87,6 +87,7 @@ void BfsTopDown::reset() {
 
 void BfsTopDown::set_parameters(vid_t source) {
     bfs_source = source;
+
     queue.insert(bfs_source);                   // insert source in the frontier
     gpu::memsetZero(d_distances + bfs_source);  // reset source distance
 }
