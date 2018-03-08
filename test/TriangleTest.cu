@@ -90,7 +90,7 @@ void testTriangleCountingConfigurations(HornetGraph& hornet, vid_t nv,degree_t n
                         int nbl=sps/tsp;
 
                         running_time[q] = time;
-                        printf("### %d %d %d %d %d \t\t %ld \t %f\n", blocks,sps, tsp, nbl, shifter,sumDevice, time);
+                        // printf("### %d %d %d %d %d \t\t %ld \t %f\n", blocks,sps, tsp, nbl, shifter,sumDevice, time);
                         average += time;
                     }
                     average = average/10;

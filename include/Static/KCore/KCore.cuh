@@ -20,7 +20,7 @@ struct KCoreData {
 
 class KCore : public StaticAlgorithm<HornetGraph> {
 public:
-    KCore(HornetGraph& hornet);
+    KCore(HornetGraph &hornet);
     ~KCore();
 
     void reset()    override;
@@ -37,8 +37,13 @@ private:
     TwoLevelQueue<vid_t> vqueue;
     TwoLevelQueue<vid_t> src_equeue;
     TwoLevelQueue<vid_t> dst_equeue;
-    TwoLevelQueue<vid_t> tot_src_equeue;
-    TwoLevelQueue<vid_t> tot_dst_equeue;
+    TwoLevelQueue<vid_t> peel_vqueue;
+    // TwoLevelQueue<vid_t> tot_src_equeue;
+    // TwoLevelQueue<vid_t> tot_dst_equeue;
+
+    vid_t *vertex_pres { nullptr };
+    vid_t *h_copy_csr_off { nullptr };
+    vid_t *h_copy_csr_edges { nullptr };
 
     // HostDeviceVar<KCoreData> hd_data;
     // MultiLevelQueue<vid_t> nodes_removed;

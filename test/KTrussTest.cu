@@ -75,8 +75,8 @@ void runKtruss(const HornetInit& hornet_init, int alg, int max_K,
                 int     nbl = sps / tsp;
 
                 HornetGraph hornet_graph(hornet_init);
-                hornet_graph.allocateEdgeDeletion(nE, CSR_WIDE |
-                                         OUT_OF_PLACE | REMOVE_CROSS_DUPLICATE);
+                // hornet_graph.allocateEdgeDeletion(nE, CSR_WIDE |
+                //                         OUT_OF_PLACE | REMOVE_CROSS_DUPLICATE);
                 KTruss kt(hornet_graph);
 
                 if (alg & 1) {
