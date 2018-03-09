@@ -274,7 +274,7 @@ void kcores(HornetGraph &hornet,
 
     uint32_t peel = 0;
     uint32_t nv = hornet.nV();
-    hornet.print();
+    // hornet.print();
 
     // while (*ne > 0) {
     while (nv > 0) {
@@ -344,7 +344,9 @@ void kcores(HornetGraph &hornet,
     src_equeue.swap();
     dst_equeue.swap();
 
-    oper_bidirect_batch(h_copy, src_equeue, dst_equeue, DELETE);
+    if (src_equeue.size() > 0) {
+        oper_bidirect_batch(h_copy, src_equeue, dst_equeue, DELETE);
+    }
 }
 
 HornetGraph* hornet_copy(HornetGraph &hornet,
@@ -446,24 +448,26 @@ void KCore::run() {
         src_equeue.print();
         dst_equeue.print();
 
-        cudaMemcpy(src + peel_edges, src_equeue.device_input_ptr(), 
-                   src_equeue.size() * sizeof(vid_t), cudaMemcpyDeviceToHost);
+        if (src_equeue.size() > 0) {
+            cudaMemcpy(src + peel_edges, src_equeue.device_input_ptr(), 
+                       src_equeue.size() * sizeof(vid_t), cudaMemcpyDeviceToHost);
 
-        cudaMemcpy(dst + peel_edges, dst_equeue.device_input_ptr(), 
-                   dst_equeue.size() * sizeof(vid_t), cudaMemcpyDeviceToHost);
+            cudaMemcpy(dst + peel_edges, dst_equeue.device_input_ptr(), 
+                       dst_equeue.size() * sizeof(vid_t), cudaMemcpyDeviceToHost);
 
-        for (uint32_t i = 0; i < src_equeue.size(); i++) {
-            peel[peel_edges + i] = max_peel;
+            for (uint32_t i = 0; i < src_equeue.size(); i++) {
+                peel[peel_edges + i] = max_peel;
+            }
+
+            #if 0
+            for (uint32_t i = 0; i < src_equeue.size(); i++) {
+                tot_src_equeue.insert(src[peel_edges + i]);
+                tot_dst_equeue.insert(dst[peel_edges + i]);
+            }
+            #endif
+
+            peel_edges += src_equeue.size();
         }
-
-        #if 0
-        for (uint32_t i = 0; i < src_equeue.size(); i++) {
-            tot_src_equeue.insert(src[peel_edges + i]);
-            tot_dst_equeue.insert(dst[peel_edges + i]);
-        }
-        #endif
-
-        peel_edges += src_equeue.size();
 
         // remove_bidirect_batch(hornet, src_equeue, dst_equeue);
         
