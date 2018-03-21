@@ -15,7 +15,9 @@ using HornetGraph = gpu::Hornet<EMPTY, EMPTY>;
 struct KCoreData {
     vid_t *src;
     vid_t *dst;
-    int counter;
+    vid_t *src_dup;
+    vid_t *dst_dup;
+    int   *counter;
 };
 
 class KCore : public StaticAlgorithm<HornetGraph> {
@@ -29,14 +31,14 @@ public:
     bool validate() override { return true; }
 
 private:
-    // HostDeviceVar<KCoreData> hd_data;
+    HostDeviceVar<KCoreData> hd_data;
 
     //load_balancing::BinarySearch load_balancing;
     load_balancing::VertexBased1 load_balancing;
 
     TwoLevelQueue<vid_t> vqueue;
-    TwoLevelQueue<vid_t> src_equeue;
-    TwoLevelQueue<vid_t> dst_equeue;
+    // TwoLevelQueue<vid_t> src_equeue;
+    // TwoLevelQueue<vid_t> dst_equeue;
     TwoLevelQueue<vid_t> peel_vqueue;
     // TwoLevelQueue<vid_t> tot_src_equeue;
     // TwoLevelQueue<vid_t> tot_dst_equeue;
