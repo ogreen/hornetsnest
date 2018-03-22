@@ -158,7 +158,7 @@ void oper_bidirect_batch(HornetGraph &hornet, vid_t *src, vid_t *dst,
 
     #if 0
     if (batch_size > batch_block) {
-        std::cout << "big batch " << batch_size << "\n";
+        std::cout << "big batch " << batch_size << std::endl;
     }
     #endif
 
@@ -239,6 +239,7 @@ void kcores(HornetGraph &hornet,
     uint32_t peel = 0;
     uint32_t nv = hornet.nV();
     int size = 0;
+    uint32_t total_batches = 0;
 
     while (nv > 0) {
         forAllVertices(hornet, CheckDeg { vqueue, peel_vqueue, 
@@ -282,6 +283,7 @@ void kcores(HornetGraph &hornet,
                 std::cout << "\n\n";
                 #endif
 
+                total_batches += (size / 1024);
                 oper_bidirect_batch(hornet, hd().src, hd().dst, size, DELETE);
                 oper_bidirect_batch(h_copy, hd().src, hd().dst, size, INSERT);
             }
@@ -310,6 +312,8 @@ void kcores(HornetGraph &hornet,
     if (size > 0) {
         oper_bidirect_batch(h_copy, hd().src, hd().dst, size, DELETE);
     }
+
+    std::cout << "total_batches: " << total_batches << "\n";
 }
 
 HornetGraph* hornet_copy(HornetGraph &hornet,
