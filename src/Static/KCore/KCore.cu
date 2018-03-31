@@ -3,6 +3,9 @@
 
 #define INSERT 0
 #define DELETE 1
+
+#define RM_DUP
+#define MULTI_BATCH
 // #include <Device/Primitives/CubWrapper.cuh>
 
 namespace hornets_nest {
@@ -153,8 +156,9 @@ void KCore::reset() {
 void oper_bidirect_batch(HornetGraph &hornet, vid_t *src, vid_t *dst, 
                          int size, uint8_t op) {
     
-    // int batch_block = 1024;
-    // int batch_size = size;
+    #ifdef MULTI_BATCH
+    int batch_block = 1024;
+    int batch_size = size;
 
     #if 0
     if (batch_size > batch_block) {
@@ -162,23 +166,69 @@ void oper_bidirect_batch(HornetGraph &hornet, vid_t *src, vid_t *dst,
     }
     #endif
 
-    // vid_t *src_ptr = src;
-    // vid_t *dst_ptr = dst;
+    vid_t *src_ptr = src;
+    vid_t *dst_ptr = dst;
 
     // Divides large batches into batches of size 1024 because larger batches
     // are buggy.
-    // while (batch_size > 0) {
-    // int this_size = std::min(batch_size, batch_block);
-    gpu::BatchUpdate batch_update_src(src, dst, size, gpu::BatchType::DEVICE);
+    while (batch_size > 0) {
+        int this_size = std::min(batch_size, batch_block);
+        // gpu::BatchUpdate batch_update_src(src, dst, size, gpu::BatchType::DEVICE);
+        gpu::BatchUpdate batch_update_src(src_ptr, dst_ptr, this_size, gpu::BatchType::DEVICE);
 
-    #if 0
-    std::cout << "sorted by src " << size << std::endl;
-    forAllVertices(hornet, PrintVertices { src,
-                                           dst,
-                                           size } );
-    std::cout << "\n\n";
-    std::cout << std::endl;
-    #endif
+        #if 0
+        std::cout << "sorted by src " << size << std::endl;
+        forAllVertices(hornet, PrintVertices { src,
+                                               dst,
+                                               size } );
+        std::cout << "\n\n";
+        std::cout << std::endl;
+        #endif
+
+        if (op == DELETE) {
+            // Delete edges in the forward direction.
+            hornet.deleteEdgeBatch(batch_update_src);
+        } else {
+            // Delete edges in the forward direction.
+            hornet.insertEdgeBatch(batch_update_src);
+        }
+
+        batch_size -= this_size;
+        src_ptr += this_size;
+        dst_ptr += this_size;
+    }
+
+    batch_size = size;
+    src_ptr = src;
+    dst_ptr = dst;
+
+    while (batch_size > 0) {
+        int this_size = std::min(batch_size, batch_block);
+        // gpu::BatchUpdate batch_update_dst(dst, src, size, gpu::BatchType::DEVICE);
+        gpu::BatchUpdate batch_update_dst(dst_ptr, src_ptr, this_size, gpu::BatchType::DEVICE);
+
+        #if 0
+        std::cout << "sorted by dst " << src_equeue.size() << std::endl;
+        forAllVertices(hornet, PrintVertices { src_equeue.device_input_ptr(),
+                                               dst_equeue.device_input_ptr(),
+                                               src_equeue.size() } );
+        std::cout << "\n\n";
+        #endif
+
+        if (op == DELETE) {
+            // Delete edges in reverse direction.
+            hornet.deleteEdgeBatch(batch_update_dst);
+        } else {
+            // Delete edges in reverse direction.
+            hornet.insertEdgeBatch(batch_update_dst);
+        }
+
+        batch_size -= this_size;
+        src_ptr += this_size;
+        dst_ptr += this_size;
+    }
+    #else
+    gpu::BatchUpdate batch_update_src(src, dst, size, gpu::BatchType::DEVICE);
 
     if (op == DELETE) {
         // Delete edges in the forward direction.
@@ -188,26 +238,7 @@ void oper_bidirect_batch(HornetGraph &hornet, vid_t *src, vid_t *dst,
         hornet.insertEdgeBatch(batch_update_src);
     }
 
-    // }
-
-
-    #if 0
-    batch_size = size;
-    src_ptr = src;
-    dst_ptr = dst;
-    #endif
-
-    // while (batch_size > 0) {
-    // int this_size = std::min(batch_size, batch_block);
     gpu::BatchUpdate batch_update_dst(dst, src, size, gpu::BatchType::DEVICE);
-
-    #if 0
-    std::cout << "sorted by dst " << src_equeue.size() << std::endl;
-    forAllVertices(hornet, PrintVertices { src_equeue.device_input_ptr(),
-                                           dst_equeue.device_input_ptr(),
-                                           src_equeue.size() } );
-    std::cout << "\n\n";
-    #endif
 
     if (op == DELETE) {
         // Delete edges in reverse direction.
@@ -216,13 +247,7 @@ void oper_bidirect_batch(HornetGraph &hornet, vid_t *src, vid_t *dst,
         // Delete edges in reverse direction.
         hornet.insertEdgeBatch(batch_update_dst);
     }
-
-    #if 0
-    batch_size -= this_size;
-    src_ptr += this_size;
-    dst_ptr += this_size;
     #endif
-    // }
 }
 
 void kcores(HornetGraph &hornet, 
@@ -262,10 +287,7 @@ void kcores(HornetGraph &hornet,
             cudaMemcpy(&size, hd().counter, sizeof(int), 
                        cudaMemcpyDeviceToHost);
 
-            #if 0
-            // Uncommenting this up until the end if and uncommenting the first two commented
-            // oper_bidirect calls (and thus commenting the third and fourth calls) reverts back
-            // to using RemoveDuplicates.
+            #ifdef RM_DUP
             gpu::memsetZero(hd().counter);  // reset counter. 
 
             forAllEdges(hornet, vqueue,
@@ -287,10 +309,13 @@ void kcores(HornetGraph &hornet,
                 std::cout << "\n\n";
                 #endif
 
-                // oper_bidirect_batch(hornet, hd().src, hd().dst, size, DELETE);
-                // oper_bidirect_batch(h_copy, hd().src, hd().dst, size, INSERT);
+                #ifdef RM_DUP
+                oper_bidirect_batch(hornet, hd().src, hd().dst, size, DELETE);
+                oper_bidirect_batch(h_copy, hd().src, hd().dst, size, INSERT);
+                #else
                 oper_bidirect_batch(hornet, hd().src_dup, hd().dst_dup, size, DELETE);
                 oper_bidirect_batch(h_copy, hd().src_dup, hd().dst_dup, size, INSERT);
+                #endif
             }
 
             *ne -= 2 * size;
