@@ -4,8 +4,8 @@
 #define INSERT 0
 #define DELETE 1
 
-#define RM_DUP
-#define MULTI_BATCH
+// #define RM_DUP
+// #define MULTI_BATCH
 // #include <Device/Primitives/CubWrapper.cuh>
 
 namespace hornets_nest {
@@ -174,7 +174,8 @@ void oper_bidirect_batch(HornetGraph &hornet, vid_t *src, vid_t *dst,
     while (batch_size > 0) {
         int this_size = std::min(batch_size, batch_block);
         // gpu::BatchUpdate batch_update_src(src, dst, size, gpu::BatchType::DEVICE);
-        gpu::BatchUpdate batch_update_src(src_ptr, dst_ptr, this_size, gpu::BatchType::DEVICE);
+        gpu::BatchUpdate batch_update_src(src_ptr, dst_ptr, this_size, 
+                                          gpu::BatchType::DEVICE);
 
         #if 0
         std::cout << "sorted by src " << size << std::endl;
@@ -205,7 +206,8 @@ void oper_bidirect_batch(HornetGraph &hornet, vid_t *src, vid_t *dst,
     while (batch_size > 0) {
         int this_size = std::min(batch_size, batch_block);
         // gpu::BatchUpdate batch_update_dst(dst, src, size, gpu::BatchType::DEVICE);
-        gpu::BatchUpdate batch_update_dst(dst_ptr, src_ptr, this_size, gpu::BatchType::DEVICE);
+        gpu::BatchUpdate batch_update_dst(dst_ptr, src_ptr, this_size, 
+                                          gpu::BatchType::DEVICE);
 
         #if 0
         std::cout << "sorted by dst " << src_equeue.size() << std::endl;
@@ -232,20 +234,28 @@ void oper_bidirect_batch(HornetGraph &hornet, vid_t *src, vid_t *dst,
 
     if (op == DELETE) {
         // Delete edges in the forward direction.
+        std::cout << "before1" << std::endl;
         hornet.deleteEdgeBatch(batch_update_src);
+        std::cout << "after1" << std::endl;
     } else {
         // Delete edges in the forward direction.
+        std::cout << "before2" << std::endl;
         hornet.insertEdgeBatch(batch_update_src);
+        std::cout << "after2" << std::endl;
     }
 
     gpu::BatchUpdate batch_update_dst(dst, src, size, gpu::BatchType::DEVICE);
 
     if (op == DELETE) {
         // Delete edges in reverse direction.
+        std::cout << "before3" << std::endl;
         hornet.deleteEdgeBatch(batch_update_dst);
+        std::cout << "after3" << std::endl;
     } else {
         // Delete edges in reverse direction.
+        std::cout << "before4" << std::endl;
         hornet.insertEdgeBatch(batch_update_dst);
+        std::cout << "after4" << std::endl;
     }
     #endif
 }
@@ -263,8 +273,6 @@ void kcores(HornetGraph &hornet,
     uint32_t peel = 0;
     uint32_t nv = hornet.nV();
     int size = 0;
-    uint32_t total_batches = 0;
-    // hornet.print();
 
     while (nv > 0) {
         forAllVertices(hornet, CheckDeg { vqueue, peel_vqueue, 
@@ -290,6 +298,7 @@ void kcores(HornetGraph &hornet,
             #ifdef RM_DUP
             gpu::memsetZero(hd().counter);  // reset counter. 
 
+            std::cout << "hereee" << std::endl;
             forAllEdges(hornet, vqueue,
                         RemoveDuplicates { hd, size },
                         load_balancing);
@@ -300,15 +309,6 @@ void kcores(HornetGraph &hornet,
             #endif
 
             if (size > 0) {
-                #if 0
-                forAllVertices(hornet, PrintVertices{ hd().src_dup, 
-                               hd().dst_dup, size });
-                std::cout << "\n\n";
-                forAllVertices(hornet, PrintVertices{ hd().dst_dup, 
-                               hd().src_dup, size });
-                std::cout << "\n\n";
-                #endif
-
                 #ifdef RM_DUP
                 oper_bidirect_batch(hornet, hd().src, hd().dst, size, DELETE);
                 oper_bidirect_batch(h_copy, hd().src, hd().dst, size, INSERT);
@@ -377,6 +377,7 @@ void json_dump(vid_t *src, vid_t *dst, uint32_t *peel, uint32_t peel_edges) {
 void KCore::run() {
     vid_t *src     = new vid_t[hornet.nE() / 2 + 1];
     vid_t *dst     = new vid_t[hornet.nE() / 2 + 1];
+    uint32_t len = hornet.nE() / 2 + 1;
     uint32_t *peel = new uint32_t[hornet.nE() / 2 + 1];
     uint32_t peel_edges = 0;
     uint32_t ne = hornet.nE();
@@ -429,6 +430,11 @@ void KCore::run() {
         }
 
         iter_count++;
+
+        if (peel_edges >= len) {
+            std::cout << "ooooops" << std::endl;
+            std::cout << "peel_edges " << peel_edges << " len " << len << std::endl;
+        }
     }
 
     json_dump(src, dst, peel, peel_edges);
