@@ -81,39 +81,7 @@ struct PeelVertices {
     }
 };
 
-struct RemoveDuplicates {
-    HostDeviceVar<KCoreData> hd;
-    int size;
-
-    OPERATOR(Vertex &v, Edge &e) {
-        vid_t src = v.id();
-        auto dst = e.dst_id();
-        
-        uint8_t double_exists = 0;
-        if (src < dst) {
-            for (uint32_t i = 0; i < size; i++) {
-                if (hd().src_dup[i] == dst && hd().dst_dup[i] == src) {
-                    double_exists = 1;
-                    break;
-                }
-            }
-        }
-
-        if (!double_exists) {
-            int spot = atomicAdd(hd().counter, 1);
-            hd().src[spot] = src;
-            hd().dst[spot] = dst;
-        }
-    }
-
-};
-
 struct Subgraph {
-    #if 0
-    HostDeviceVar<KCoreData> hd;
-    const vid_t *peelq_ptr;
-    int32_t size;
-    #endif
     HostDeviceVar<KCoreData> hd;
     vid_t *vertex_subg;
 
@@ -121,20 +89,6 @@ struct Subgraph {
         vid_t src = v.id();
         auto dst = e.dst_id();
 
-        #if 0
-        uint8_t exists = 0;
-
-        if (src < dst) {
-            for (uint32_t i = 0; i < size; i++) {
-                if (peelq_ptr[i] == dst) {
-                    exists = 1;
-                    break;
-                }
-            }
-        }
-        #endif
-
-        // if (exists) {
         if (src < dst && vertex_subg[dst] == 1) {
             int spot = atomicAdd(hd().counter, 1);
             hd().src[spot] = src;
