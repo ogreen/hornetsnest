@@ -44,6 +44,7 @@ private:
     // TwoLevelQueue<vid_t> tot_dst_equeue;
 
     vid_t *vertex_pres { nullptr };
+    vid_t *vertex_subg { nullptr };
     vid_t *h_copy_csr_off { nullptr };
     vid_t *h_copy_csr_edges { nullptr };
 

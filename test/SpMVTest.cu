@@ -6,7 +6,7 @@
 #include <Graph/GraphStd.hpp>
 #include <Util/CommandLineParam.hpp>
 //#include <cuda_profiler_api.h> //--profile-from-start off
-#include <cub/cub.cuh>
+// #include <cub/cub.cuh> -- nonexistent now.
 
 int main(int argc, char* argv[]) {
     using namespace timer;
