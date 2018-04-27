@@ -1,3 +1,4 @@
+#include <Device/Util/Timer.cuh>
 #include "Static/KCore/KCore.cuh"
 #include <fstream>
 
@@ -6,6 +7,7 @@
 
 // #include <Device/Primitives/CubWrapper.cuh>
 
+using namespace timer;
 namespace hornets_nest {
 
 KCore::KCore(HornetGraph &hornet) : 
@@ -330,7 +332,7 @@ void KCore::run() {
             std::cout << "peel_edges " << peel_edges << " len " << len << std::endl;
         }
     }
-    TM.end();
+    TM.stop();
     TM.print("KCore");
 
     cudaMemcpy(src, hd_data().src_tot, 
