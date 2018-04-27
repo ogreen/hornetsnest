@@ -25,9 +25,11 @@ KCore::KCore(HornetGraph &hornet) :
     gpu::allocate(vertex_subg, hornet.nV());
     gpu::allocate(hd_data().src,    hornet.nE());
     gpu::allocate(hd_data().dst,    hornet.nE());
-    gpu::allocate(hd_data().src_dup,    hornet.nE());
-    gpu::allocate(hd_data().dst_dup,    hornet.nE());
+    gpu::allocate(hd_data().src_tot,    hornet.nE());
+    gpu::allocate(hd_data().dst_tot,    hornet.nE());
     gpu::allocate(hd_data().counter, 1);
+    gpu::allocate(hd_data().counter_tot, 1);
+    gpu::memsetZero(hd_data().counter_tot);  // initialize counter for all edge mapping.
 }
 
 KCore::~KCore() {
@@ -35,9 +37,10 @@ KCore::~KCore() {
     gpu::free(vertex_subg);
     gpu::free(hd_data().src);
     gpu::free(hd_data().dst);
-    gpu::free(hd_data().src_dup);
-    gpu::free(hd_data().dst_dup);
+    gpu::free(hd_data().src_tot);
+    gpu::free(hd_data().dst_tot);
     gpu::free(hd_data().counter);
+    gpu::free(hd_data().counter_tot);
     delete[] h_copy_csr_off;
     delete[] h_copy_csr_edges;
 }
@@ -76,8 +79,8 @@ struct PeelVertices {
         auto dst = e.dst_id();
 
         int spot = atomicAdd(hd().counter, 1);
-        hd().src_dup[spot] = src;
-        hd().dst_dup[spot] = dst;
+        hd().src[spot] = src;
+        hd().dst[spot] = dst;
     }
 };
 
@@ -93,6 +96,10 @@ struct Subgraph {
             int spot = atomicAdd(hd().counter, 1);
             hd().src[spot] = src;
             hd().dst[spot] = dst;
+
+            int spot_tot = atomicAdd(hd().counter_tot, 1);
+            hd().src_tot[spot_tot] = src;
+            hd().dst_tot[spot_tot] = dst;
         }
     }
 };
@@ -188,31 +195,13 @@ void kcores(HornetGraph &hornet,
             // Find all vertices with degree <= peel.
             gpu::memsetZero(hd().counter);  // reset counter. 
 
-            forAllEdges(hornet, vqueue, 
-                        // PeelVertices { src_equeue, dst_equeue }, 
-                        PeelVertices { hd }, 
-                        load_balancing); 
+            forAllEdges(hornet, vqueue, PeelVertices { hd }, load_balancing); 
 
-            cudaMemcpy(&size, hd().counter, sizeof(int), 
-                       cudaMemcpyDeviceToHost);
+            cudaMemcpy(&size, hd().counter, sizeof(int), cudaMemcpyDeviceToHost);
 
             if (size > 0) {
-                #if 0
-                if (iter_count == 15) {
-                    forAllVertices(hornet, PrintVertices { hd().src_dup, hd().dst_dup,
-                                                           size });
-                    std::cout << "\n\n";
-
-                    #if 0
-                    forAllVertices(hornet, PrintVertices { hd().dst_dup, hd().src_dup,
-                                                           size });
-                    std::cout << "\n\n";
-                    #endif
-                }
-                #endif
-
-                oper_bidirect_batch(hornet, hd().src_dup, hd().dst_dup, size, DELETE);
-                oper_bidirect_batch(h_copy, hd().src_dup, hd().dst_dup, size, INSERT);
+                oper_bidirect_batch(hornet, hd().src, hd().dst, size, DELETE);
+                oper_bidirect_batch(h_copy, hd().src, hd().dst, size, INSERT);
             }
 
             *ne -= 2 * size;
@@ -224,7 +213,6 @@ void kcores(HornetGraph &hornet,
         }
     }
     *max_peel = peel;
-    // std::cout << "peel: " << peel << std::endl;
 
     peel_vqueue.swap();
 
@@ -234,13 +222,6 @@ void kcores(HornetGraph &hornet,
     forAllEdges(h_copy, peel_vqueue, Subgraph { hd, vertex_subg }, load_balancing);
 
     forAllVertices(h_copy, ClearSubgraph { vertex_subg });
-    #if 0
-    forAllEdges(h_copy, peel_vqueue,
-                Subgraph { hd,
-                           peel_vqueue.device_input_ptr(),
-                           peel_vqueue.size() },
-                load_balancing);
-    #endif
     
     cudaMemcpy(&size, hd().counter, sizeof(int), cudaMemcpyDeviceToHost);
     
@@ -280,6 +261,7 @@ void json_dump(vid_t *src, vid_t *dst, uint32_t *peel, uint32_t peel_edges) {
 }
 
 void KCore::run() {
+    omp_set_num_threads(72);
     vid_t *src     = new vid_t[hornet.nE() / 2 + 1];
     vid_t *dst     = new vid_t[hornet.nE() / 2 + 1];
     uint32_t len = hornet.nE() / 2 + 1;
@@ -294,6 +276,8 @@ void KCore::run() {
     forAllnumV(hornet, [=] __device__ (int i){ pres[i] = 1; } );
     forAllnumV(hornet, [=] __device__ (int i){ subg[i] = 0; } );
 
+    Timer<DEVICE> TM;
+    TM.start();
     HornetGraph &h_copy = *hornet_copy(hornet, h_copy_csr_off,
                                        h_copy_csr_edges);
 
@@ -323,12 +307,15 @@ void KCore::run() {
                    cudaMemcpyDeviceToHost);
 
         if (size > 0) {
+            #if 0
             cudaMemcpy(src + peel_edges, hd_data().src, 
                        size * sizeof(vid_t), cudaMemcpyDeviceToHost);
 
             cudaMemcpy(dst + peel_edges, hd_data().dst, 
                        size * sizeof(vid_t), cudaMemcpyDeviceToHost);
+            #endif
 
+            #pragma omp parallel for
             for (uint32_t i = 0; i < size; i++) {
                 peel[peel_edges + i] = max_peel;
             }
@@ -343,6 +330,14 @@ void KCore::run() {
             std::cout << "peel_edges " << peel_edges << " len " << len << std::endl;
         }
     }
+    TM.end();
+    TM.print("KCore");
+
+    cudaMemcpy(src, hd_data().src_tot, 
+               peel_edges * sizeof(vid_t), cudaMemcpyDeviceToHost);
+
+    cudaMemcpy(dst, hd_data().dst_tot, 
+                peel_edges * sizeof(vid_t), cudaMemcpyDeviceToHost);
 
     json_dump(src, dst, peel, peel_edges);
 }

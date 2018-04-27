@@ -15,9 +15,10 @@ using HornetGraph = gpu::Hornet<EMPTY, EMPTY>;
 struct KCoreData {
     vid_t *src;
     vid_t *dst;
-    vid_t *src_dup;
-    vid_t *dst_dup;
+    vid_t *src_tot;
+    vid_t *dst_tot;
     int   *counter;
+    int   *counter_tot;
 };
 
 class KCore : public StaticAlgorithm<HornetGraph> {
