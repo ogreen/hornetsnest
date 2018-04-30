@@ -2,6 +2,8 @@
 #include "Static/KCore/KCore.cuh"
 #include <fstream>
 
+#include <nvToolsExt.h>
+
 #define INSERT 0
 #define DELETE 1
 
@@ -16,7 +18,10 @@ KCore::KCore(HornetGraph &hornet) :
                         // src_equeue(hornet, 4.0f),
                         // dst_equeue(hornet, 4.0f),
                         peel_vqueue(hornet),
-                        load_balancing(hornet) {
+                        load_balancing(hornet),
+                        batch_update(hd_data().src, hd_data().dst, hornet.nE(), 
+                                     gpu::BatchType::DEVICE)
+                        {
 
     h_copy_csr_off   = new vid_t[hornet.nV() + 1]();
     h_copy_csr_edges = new vid_t[0]();
@@ -32,6 +37,9 @@ KCore::KCore(HornetGraph &hornet) :
     gpu::allocate(hd_data().counter, 1);
     gpu::allocate(hd_data().counter_tot, 1);
     gpu::memsetZero(hd_data().counter_tot);  // initialize counter for all edge mapping.
+
+    batch_update = *(new gpu::BatchUpdate(hd_data().src, hd_data().dst, hornet.nE(), 
+                                          gpu::BatchType::DEVICE));
 }
 
 KCore::~KCore() {
@@ -83,11 +91,16 @@ struct PeelVertices {
         int spot = atomicAdd(hd().counter, 1);
         hd().src[spot] = src;
         hd().dst[spot] = dst;
+
+        int spot_rev = atomicAdd(hd().counter, 1);
+        hd().src[spot_rev] = dst;
+        hd().dst[spot_rev] = src;
     }
 };
 
 struct Subgraph {
     HostDeviceVar<KCoreData> hd;
+    uint32_t peel_edges;
     vid_t *vertex_subg;
 
     OPERATOR(Vertex &v, Edge &e) {
@@ -99,7 +112,12 @@ struct Subgraph {
             hd().src[spot] = src;
             hd().dst[spot] = dst;
 
+            int spot_rev = atomicAdd(hd().counter, 1);
+            hd().src[spot_rev] = dst;
+            hd().dst[spot_rev] = src;
+
             int spot_tot = atomicAdd(hd().counter_tot, 1);
+            // uint32_t spot_tot = peel_edges + spot;
             hd().src_tot[spot_tot] = src;
             hd().dst_tot[spot_tot] = dst;
         }
@@ -146,19 +164,31 @@ void KCore::reset() {
 
 void oper_bidirect_batch(HornetGraph &hornet, vid_t *src, vid_t *dst, 
                          int size, uint8_t op) {
+// void oper_bidirect_batch(HornetGraph &hornet, gpu::BatchUpdate &batch_update, 
+//                         uint8_t op) {
     
-    gpu::BatchUpdate batch_update_src(src, dst, size, gpu::BatchType::DEVICE);
+    nvtxRangeId_t id3 = nvtxRangeStartA("batch src construct range");
+    gpu::BatchUpdate batch_update(src, dst, size, gpu::BatchType::DEVICE);
+    nvtxRangeEnd(id3);
 
+    nvtxRangeId_t id4 = nvtxRangeStartA("batch insert/delete range");
     if (op == DELETE) {
         // Delete edges in the forward direction.
-        hornet.deleteEdgeBatch(batch_update_src);
+        // hornet.deleteEdgeBatch(batch_update_src);
+        hornet.deleteEdgeBatch(batch_update);
     } else {
         // Delete edges in the forward direction.
-        hornet.insertEdgeBatch(batch_update_src);
+        // hornet.insertEdgeBatch(batch_update_src);
+        hornet.insertEdgeBatch(batch_update);
     }
+    nvtxRangeEnd(id4);
 
+    #if 0
+    nvtxRangeId_t id5 = nvtxRangeStartA("batch dst construct range");
     gpu::BatchUpdate batch_update_dst(dst, src, size, gpu::BatchType::DEVICE);
+    nvtxRangeEnd(id5);
 
+    nvtxRangeId_t id6 = nvtxRangeStartA("batch insert/delete range");
     if (op == DELETE) {
         // Delete edges in reverse direction.
         hornet.deleteEdgeBatch(batch_update_dst);
@@ -166,6 +196,8 @@ void oper_bidirect_batch(HornetGraph &hornet, vid_t *src, vid_t *dst,
         // Delete edges in reverse direction.
         hornet.insertEdgeBatch(batch_update_dst);
     }
+    nvtxRangeEnd(id6);
+    #endif
 }
 
 void kcores(HornetGraph &hornet, 
@@ -178,12 +210,14 @@ void kcores(HornetGraph &hornet,
             vid_t *vertex_pres,
             vid_t *vertex_subg,
             uint32_t *ne,
-            uint32_t iter_count) {
+            uint32_t peel_edges,
+            gpu::BatchUpdate &batch_update) {
 
     uint32_t peel = 0;
     uint32_t nv = hornet.nV();
     int size = 0;
-
+    
+    nvtxRangeId_t id1 = nvtxRangeStartA("iteration range");
     while (nv > 0) {
         forAllVertices(hornet, CheckDeg { vqueue, peel_vqueue, 
                                           vertex_pres, peel });
@@ -202,11 +236,16 @@ void kcores(HornetGraph &hornet,
             cudaMemcpy(&size, hd().counter, sizeof(int), cudaMemcpyDeviceToHost);
 
             if (size > 0) {
+                nvtxRangeId_t id2 = nvtxRangeStartA("batch range");
                 oper_bidirect_batch(hornet, hd().src, hd().dst, size, DELETE);
                 oper_bidirect_batch(h_copy, hd().src, hd().dst, size, INSERT);
+                nvtxRangeEnd(id2);
+                // oper_bidirect_batch(hornet, batch_update, DELETE);
+                // oper_bidirect_batch(h_copy, batch_update, INSERT);
             }
 
-            *ne -= 2 * size;
+            // *ne -= 2 * size;
+            *ne -= size;
 
             vqueue.clear();
         } else {
@@ -221,7 +260,9 @@ void kcores(HornetGraph &hornet,
     forAllEdges(h_copy, peel_vqueue, SubgraphVertices { vertex_subg }, load_balancing);
 
     gpu::memsetZero(hd().counter);  // reset counter. 
-    forAllEdges(h_copy, peel_vqueue, Subgraph { hd, vertex_subg }, load_balancing);
+    // forAllEdges(h_copy, peel_vqueue, Subgraph { hd, vertex_subg }, load_balancing);
+    forAllEdges(h_copy, peel_vqueue, Subgraph { hd, peel_edges, vertex_subg }, 
+                load_balancing);
 
     forAllVertices(h_copy, ClearSubgraph { vertex_subg });
     
@@ -229,7 +270,9 @@ void kcores(HornetGraph &hornet,
     
     if (size > 0) {
         oper_bidirect_batch(h_copy, hd().src, hd().dst, size, DELETE);
+        // oper_bidirect_batch(h_copy, batch_update, DELETE);
     }
+    nvtxRangeEnd(id1);
 }
 
 HornetGraph* hornet_copy(HornetGraph &hornet,
@@ -292,12 +335,14 @@ void KCore::run() {
 
         if (iter_count % 2) {
             kcores(h_copy, hornet, vqueue, hd_data, peel_vqueue, 
-                   load_balancing, &max_peel, vertex_pres, vertex_subg, &ne, iter_count);
+                   load_balancing, &max_peel, vertex_pres, vertex_subg, &ne, 
+                   peel_edges, batch_update);
             
             forAllVertices(hornet, SetPresent { vertex_pres });
         } else {
             kcores(hornet, h_copy, vqueue, hd_data, peel_vqueue, 
-                   load_balancing, &max_peel, vertex_pres, vertex_subg, &ne, iter_count);
+                   load_balancing, &max_peel, vertex_pres, vertex_subg, &ne, 
+                   peel_edges, batch_update);
 
             forAllVertices(h_copy, SetPresent { vertex_pres });
         }
@@ -307,6 +352,7 @@ void KCore::run() {
 
         cudaMemcpy(&size, hd_data().counter, sizeof(int), 
                    cudaMemcpyDeviceToHost);
+        size /= 2;
 
         if (size > 0) {
             #if 0

@@ -6,6 +6,8 @@ FIND_PACKAGE(CUDA REQUIRED)
 
 add_subdirectory(externals/hornet)
 
+find_library( NVTX_LIBRARY nvToolsExt PATHS ENV LD_LIBRARY_PATH )
+
 include_directories(include)
 include_directories(externals/hornet/include)
 include_directories(externals/hornet/externals/cub-1.7.4)
@@ -45,4 +47,4 @@ target_link_libraries(ktruss   hornetAlg hornet)
 target_link_libraries(triangle hornetAlg hornet)
 target_link_libraries(adjinter hornetAlg hornet)
 target_link_libraries(triangle2 hornetAlg hornet)
-target_link_libraries(kcore    hornetAlg hornet)
+target_link_libraries(kcore    hornetAlg hornet ${NVTX_LIBRARY})

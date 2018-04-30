@@ -48,6 +48,7 @@ private:
     vid_t *vertex_subg { nullptr };
     vid_t *h_copy_csr_off { nullptr };
     vid_t *h_copy_csr_edges { nullptr };
+    gpu::BatchUpdate batch_update;
 
     // HostDeviceVar<KCoreData> hd_data;
     // MultiLevelQueue<vid_t> nodes_removed;
