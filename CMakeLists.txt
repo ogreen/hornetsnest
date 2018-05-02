@@ -4,15 +4,16 @@ project(${PROJECT} CXX)
 cmake_minimum_required(VERSION 3.5)
 FIND_PACKAGE(CUDA REQUIRED)
 
-add_subdirectory(externals/hornet)
-
 find_library( NVTX_LIBRARY nvToolsExt PATHS ENV LD_LIBRARY_PATH )
+
+add_subdirectory(externals/hornet)
 
 include_directories(include)
 include_directories(externals/hornet/include)
 include_directories(externals/hornet/externals/cub-1.7.4)
 include_directories(externals/hornet/externals/cpp-btree-master)
 include_directories(externals/hornet/externals/xlib/include)
+
 
 include(externals/hornet/externals/xlib/util/CMakeLists.txt)
 #-------------------------------------------------------------------------------

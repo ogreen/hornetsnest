@@ -30,9 +30,11 @@ public:
     void run()      override;
     void release()  override;
     bool validate() override { return true; }
+    void set_hcopy(HornetGraph *h_copy);
 
 private:
     HostDeviceVar<KCoreData> hd_data;
+    HornetGraph *h_copy_ptr;
 
     //load_balancing::BinarySearch load_balancing;
     load_balancing::VertexBased1 load_balancing;
@@ -45,6 +47,7 @@ private:
     // TwoLevelQueue<vid_t> tot_dst_equeue;
 
     vid_t *vertex_pres { nullptr };
+    vid_t *vertex_color { nullptr };
     vid_t *vertex_subg { nullptr };
     vid_t *h_copy_csr_off { nullptr };
     vid_t *h_copy_csr_edges { nullptr };

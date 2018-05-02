@@ -7,6 +7,8 @@
 #define INSERT 0
 #define DELETE 1
 
+#define NVTX_DEBUG
+
 // #include <Device/Primitives/CubWrapper.cuh>
 
 using namespace timer;
@@ -29,6 +31,7 @@ KCore::KCore(HornetGraph &hornet) :
     memset(h_copy_csr_off, 0, (hornet.nV() + 1) * sizeof(vid_t));
 
     gpu::allocate(vertex_pres, hornet.nV());
+    gpu::allocate(vertex_color, hornet.nV());
     gpu::allocate(vertex_subg, hornet.nV());
     gpu::allocate(hd_data().src,    hornet.nE());
     gpu::allocate(hd_data().dst,    hornet.nE());
@@ -44,6 +47,7 @@ KCore::KCore(HornetGraph &hornet) :
 
 KCore::~KCore() {
     gpu::free(vertex_pres);
+    gpu::free(vertex_color);
     gpu::free(vertex_subg);
     gpu::free(hd_data().src);
     gpu::free(hd_data().dst);
@@ -55,10 +59,15 @@ KCore::~KCore() {
     delete[] h_copy_csr_edges;
 }
 
+void KCore::set_hcopy(HornetGraph *h_copy_arg) {
+    h_copy_ptr = h_copy_arg;
+}
+
 struct CheckDeg {
     TwoLevelQueue<vid_t> vqueue;
     TwoLevelQueue<vid_t> peel_vqueue;
     vid_t *vertex_pres;
+    vid_t *vertex_color;
     uint32_t peel;
 
     OPERATOR(Vertex &v) {
@@ -68,6 +77,7 @@ struct CheckDeg {
             vqueue.insert(id);
             peel_vqueue.insert(id);
             vertex_pres[id] = 0;
+            vertex_color[id] = 1;
         }
     } 
 };
@@ -81,9 +91,18 @@ struct SetPresent {
     }
 };
 
-struct PeelVertices {
-    HostDeviceVar<KCoreData> hd;
+struct SetColor {
+    vid_t *vertex_color;
 
+    OPERATOR(Vertex &v) {
+        vid_t id = v.id();
+        vertex_color[id] = 0;
+    }
+};
+
+struct ClearHCopy {
+    HostDeviceVar<KCoreData> hd;
+    
     OPERATOR(Vertex &v, Edge &e) {
         vid_t src = v.id();
         auto dst = e.dst_id();
@@ -91,10 +110,45 @@ struct PeelVertices {
         int spot = atomicAdd(hd().counter, 1);
         hd().src[spot] = src;
         hd().dst[spot] = dst;
+    }
+};
+
+struct PeelVertices {
+    HostDeviceVar<KCoreData> hd;
+    vid_t *vertex_color;
+
+    OPERATOR(Vertex &v, Edge &e) {
+        vid_t src = v.id();
+        auto dst = e.dst_id();
+
+        if (vertex_color[src] && vertex_color[dst]) {
+            if (src < dst) {
+                int spot = atomicAdd(hd().counter, 1);
+                hd().src[spot] = src;
+                hd().dst[spot] = dst;
+
+                int spot_rev = atomicAdd(hd().counter, 1);
+                hd().src[spot_rev] = dst;
+                hd().dst[spot_rev] = src;
+            }
+        } else if (vertex_color[src] || vertex_color[dst]) {
+            int spot = atomicAdd(hd().counter, 1);
+            hd().src[spot] = src;
+            hd().dst[spot] = dst;
+
+            int spot_rev = atomicAdd(hd().counter, 1);
+            hd().src[spot_rev] = dst;
+            hd().dst[spot_rev] = src;
+        }
+        #if 0
+        int spot = atomicAdd(hd().counter, 1);
+        hd().src[spot] = src;
+        hd().dst[spot] = dst;
 
         int spot_rev = atomicAdd(hd().counter, 1);
         hd().src[spot_rev] = dst;
         hd().dst[spot_rev] = src;
+        #endif
     }
 };
 
@@ -164,40 +218,29 @@ void KCore::reset() {
 
 void oper_bidirect_batch(HornetGraph &hornet, vid_t *src, vid_t *dst, 
                          int size, uint8_t op) {
-// void oper_bidirect_batch(HornetGraph &hornet, gpu::BatchUpdate &batch_update, 
-//                         uint8_t op) {
-    
+#ifdef NVTX_DEBUG
     nvtxRangeId_t id3 = nvtxRangeStartA("batch src construct range");
+#endif
     gpu::BatchUpdate batch_update(src, dst, size, gpu::BatchType::DEVICE);
-    nvtxRangeEnd(id3);
 
+#ifdef NVTX_DEBUG
     nvtxRangeId_t id4 = nvtxRangeStartA("batch insert/delete range");
+#endif
     if (op == DELETE) {
         // Delete edges in the forward direction.
         // hornet.deleteEdgeBatch(batch_update_src);
-        hornet.deleteEdgeBatch(batch_update);
-    } else {
+        hornet.deleteEdgeBatch(batch_update, gpu::batch_property::IN_PLACE);
+        // hornet.deleteEdgeBatch(batch_update);
+    } else if (op == INSERT) {
         // Delete edges in the forward direction.
         // hornet.insertEdgeBatch(batch_update_src);
-        hornet.insertEdgeBatch(batch_update);
+        hornet.insertEdgeBatch(batch_update, gpu::batch_property::IN_PLACE);
+                                        // gpu::batch_property::REMOVE_BATCH_DUPLICATE);
+        // hornet.insertEdgeBatch(batch_update);
     }
+#ifdef NVTX_DEBUG
     nvtxRangeEnd(id4);
-
-    #if 0
-    nvtxRangeId_t id5 = nvtxRangeStartA("batch dst construct range");
-    gpu::BatchUpdate batch_update_dst(dst, src, size, gpu::BatchType::DEVICE);
-    nvtxRangeEnd(id5);
-
-    nvtxRangeId_t id6 = nvtxRangeStartA("batch insert/delete range");
-    if (op == DELETE) {
-        // Delete edges in reverse direction.
-        hornet.deleteEdgeBatch(batch_update_dst);
-    } else {
-        // Delete edges in reverse direction.
-        hornet.insertEdgeBatch(batch_update_dst);
-    }
-    nvtxRangeEnd(id6);
-    #endif
+#endif
 }
 
 void kcores(HornetGraph &hornet, 
@@ -209,6 +252,7 @@ void kcores(HornetGraph &hornet,
             uint32_t *max_peel,
             vid_t *vertex_pres,
             vid_t *vertex_subg,
+            vid_t *vertex_color,
             uint32_t *ne,
             uint32_t peel_edges,
             gpu::BatchUpdate &batch_update) {
@@ -217,10 +261,13 @@ void kcores(HornetGraph &hornet,
     uint32_t nv = hornet.nV();
     int size = 0;
     
+#ifdef NVTX_DEBUG
     nvtxRangeId_t id1 = nvtxRangeStartA("iteration range");
+#endif
     while (nv > 0) {
+        forAllVertices(hornet, SetColor { vertex_color });
         forAllVertices(hornet, CheckDeg { vqueue, peel_vqueue, 
-                                          vertex_pres, peel });
+                                          vertex_pres, vertex_color, peel });
         
         vqueue.swap();
         nv -= vqueue.size();
@@ -231,17 +278,20 @@ void kcores(HornetGraph &hornet,
             // Find all vertices with degree <= peel.
             gpu::memsetZero(hd().counter);  // reset counter. 
 
-            forAllEdges(hornet, vqueue, PeelVertices { hd }, load_balancing); 
+            forAllEdges(hornet, vqueue, PeelVertices { hd, vertex_color }, 
+                        load_balancing); 
 
             cudaMemcpy(&size, hd().counter, sizeof(int), cudaMemcpyDeviceToHost);
 
             if (size > 0) {
+#ifdef NVTX_DEBUG
                 nvtxRangeId_t id2 = nvtxRangeStartA("batch range");
+#endif
                 oper_bidirect_batch(hornet, hd().src, hd().dst, size, DELETE);
                 oper_bidirect_batch(h_copy, hd().src, hd().dst, size, INSERT);
+#ifdef NVTX_DEBUG
                 nvtxRangeEnd(id2);
-                // oper_bidirect_batch(hornet, batch_update, DELETE);
-                // oper_bidirect_batch(h_copy, batch_update, INSERT);
+#endif
             }
 
             // *ne -= 2 * size;
@@ -272,7 +322,9 @@ void kcores(HornetGraph &hornet,
         oper_bidirect_batch(h_copy, hd().src, hd().dst, size, DELETE);
         // oper_bidirect_batch(h_copy, batch_update, DELETE);
     }
+#ifdef NVTX_DEBUG
     nvtxRangeEnd(id1);
+#endif
 }
 
 HornetGraph* hornet_copy(HornetGraph &hornet,
@@ -316,33 +368,51 @@ void KCore::run() {
     uint32_t ne_orig = hornet.nE();
 
     auto pres = vertex_pres;
+    auto color = vertex_color;
     auto subg = vertex_subg;
+    HornetGraph &h_copy = *h_copy_ptr;
     
     forAllnumV(hornet, [=] __device__ (int i){ pres[i] = 1; } );
     forAllnumV(hornet, [=] __device__ (int i){ subg[i] = 0; } );
+    forAllnumV(hornet, [=] __device__ (int i){ color[i] = 0; } );
 
-    Timer<DEVICE> TM;
-    TM.start();
-    HornetGraph &h_copy = *hornet_copy(hornet, h_copy_csr_off,
-                                       h_copy_csr_edges);
+    // HornetGraph &h_copy = *hornet_copy(hornet, h_copy_csr_off,
+    //                                   h_copy_csr_edges);
+
+    gpu::memsetZero(hd_data().counter);  // reset counter. 
+
+    forAllEdges(h_copy, ClearHCopy { hd_data }, load_balancing);
+    oper_bidirect_batch(h_copy, hd_data().src, hd_data().dst, hornet.nE(), DELETE);
+
+    hornet.reserveBatchOpResource(hornet.nE(),
+                                     gpu::batch_property::IN_PLACE | 
+                                     gpu::batch_property::REMOVE_BATCH_DUPLICATE |
+                                     gpu::batch_property::REMOVE_CROSS_DUPLICATE);
+
+    h_copy.reserveBatchOpResource(hornet.nE(),
+                                     gpu::batch_property::IN_PLACE | 
+                                     gpu::batch_property::REMOVE_BATCH_DUPLICATE |
+                                     gpu::batch_property::REMOVE_CROSS_DUPLICATE);
 
     uint32_t iter_count = 0; 
     int size = 0;
 
+    Timer<DEVICE> TM;
+    TM.start();
     while (peel_edges < ne_orig / 2) {
         uint32_t max_peel = 0;
         ne = ne_orig - 2 * peel_edges;
 
         if (iter_count % 2) {
             kcores(h_copy, hornet, vqueue, hd_data, peel_vqueue, 
-                   load_balancing, &max_peel, vertex_pres, vertex_subg, &ne, 
-                   peel_edges, batch_update);
+                   load_balancing, &max_peel, vertex_pres, vertex_subg, 
+                   vertex_color, &ne, peel_edges, batch_update);
             
             forAllVertices(hornet, SetPresent { vertex_pres });
         } else {
             kcores(hornet, h_copy, vqueue, hd_data, peel_vqueue, 
-                   load_balancing, &max_peel, vertex_pres, vertex_subg, &ne, 
-                   peel_edges, batch_update);
+                   load_balancing, &max_peel, vertex_pres, vertex_subg, 
+                   vertex_color, &ne, peel_edges, batch_update);
 
             forAllVertices(h_copy, SetPresent { vertex_pres });
         }

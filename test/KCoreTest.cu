@@ -17,9 +17,11 @@ int main(int argc, char **argv) {
                            graph.csr_out_edges(), true);
 
     HornetGraph hornet_graph(hornet_init);
+    HornetGraph h_copy(hornet_init);
 
     KCore kcore(hornet_graph);
 
+    kcore.set_hcopy(&h_copy);
     kcore.run();
 
 }
