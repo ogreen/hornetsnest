@@ -74,8 +74,8 @@ void ApproximateBC::release(){
 void ApproximateBC::run() {
 
     for(vid_t r=0; r<numRoots; r++){
-        if((r%200)==0)
-            cout << r << ", " << flush;
+        if((r%1000)==0)
+            cout << r << ", "  << h_rootIDs[r] << endl;
         
         BCCentrality::setRoot(h_rootIDs[r]);
         BCCentrality::run();

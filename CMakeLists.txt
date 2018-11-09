@@ -31,6 +31,8 @@ cuda_add_executable(triangle test/TriangleTest.cu)
 cuda_add_executable(triangle2 test/TriangleTest2.cu)
 cuda_add_executable(pr test/PageRankTest.cu)
 
+cuda_add_executable(bcMulti test/BCMultiTest.cu)
+
 target_link_libraries(bfs      hornetAlg hornet)
 target_link_libraries(bfs2     hornetAlg hornet)
 target_link_libraries(brim     hornetAlg hornet)
@@ -42,3 +44,6 @@ target_link_libraries(dyn_katz hornetAlg hornet)
 target_link_libraries(triangle hornetAlg hornet)
 target_link_libraries(triangle2 hornetAlg hornet)
 target_link_libraries(pr hornetAlg hornet)
+
+
+target_link_libraries(bcMulti hornetAlg hornet)
